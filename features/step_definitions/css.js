@@ -178,19 +178,32 @@ module.exports = function() {
     /* Image Diff test */
     shouldLookTheSameAsBefore = function(elementName, callback) {
         var elementSelector = selectors(elementName);
+        var config = {};
+
+	if (process.env.CONFIGFILE) {
+	    config = require(process.env.CONFIGFILE);
+        }
+
         imageTest.init({
             screenshotRoot: process.env.TESTPATH + '/screenshots',
             processRoot: process.env.BINARYPATH,
-            webdriver: this
+            webdriver: this,
+            fileNameGetter : config.fileNameGetter || false
         });
         imageTest.screenshot(elementSelector, function(err, result) {
             if (err) {
                 return callback.fail(err);
             }
             if (result.status === 'firstrun') {
-                return callback.fail(new Error("First time this test has been run. New test cases have been created."));
+                console.log("\n -- Notice: --");
+                console.log(" First time this test with selector named:'" +
+                                elementName +
+                                "' has been run and new test cases have been created");
+                return callback();
             }
-            imageTest.compare(result.value, callback);
+            else {
+                imageTest.compare(result.value, callback);
+            }
         });
     };
     this.Then(/^"([^"]*)" should look the same as before$/, shouldLookTheSameAsBefore);
