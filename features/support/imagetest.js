@@ -5,13 +5,12 @@
 // Reworked here to work with any Selenium-powered browser
 
 var fs = require('fs');
-var _tolerance = 64;
 var _root = '.';
 var _count = 0;
 var webdriver;
-var exitStatus;
 var platform = require('os').platform();
-var _processRoot = process.cwd();
+var logger = require("./logger")();
+var _cropImage, _compareImages, _createImageDiff;
 
 exports.screenshot = screenshot;
 exports.compare = compare;
@@ -20,11 +19,13 @@ exports.init = init;
 function init(options) {
     webdriver = options.webdriver || {};
     _root = options.screenshotRoot || _root;
-    _processRoot = options.processRoot || _processRoot;
     _fileNameGetter = options.fileNameGetter || _fileNameGetter;
+    _cropImage = options.cropImage;
+    _compareImages = options.compareImages;
+    _createImageDiff = options.createImageDiff;
 }
 
-function _fileNameGetter(_root, selector) {
+function _fileNameGetter(_root, selector, webdriver) {
     // Possibly use selector here for filename
     selector = selector.replace(/[\#\.\s:>]/g,'');
 
@@ -39,7 +40,7 @@ function _fileNameGetter(_root, selector) {
 
 // If we're grabbing the whole page, just use webdriver default
 function screenshot(selector, callback) {
-    var filename = _fileNameGetter(_root, selector);
+    var filename = _fileNameGetter(_root, selector, webdriver);
     if(typeof selector === "function") {
         // No selector passed, capture the whole page
         // selector is actually the callback
@@ -78,18 +79,14 @@ function captureSelector(filename, selector, callback) {
                         return callback("Error saving screenshot to temp file: " + tempFile, tempFile);
                     }
 
-                    // Spawn a separate process to crop the image to the size and position of the element
-                    // console.log(_processRoot + '/lib/GhostKnife/ghostknife', [tempFile, where.x, where.y, size.width, size.height, 3000, 10000, filename]);
-                    var spawn = require('child_process').spawn,
-                    imgcrp = spawn(_processRoot + '/lib/GhostKnife/ghostknife', [tempFile, where.x, where.y, size.width, size.height, 3000, 10000, filename]);
-                    imgcrp.on('exit', function(code) {
-                        if (code === 0) {
+                    _cropImage(tempFile, filename, { x:where.x, y:where.y, width:size.width, height:size.height }, function(res) {
+                        if (res instanceof Error) {
+                            callback(res);
+                        }
+                        else {
                             callback(null, {status: /\.diff\./.test(filename)?'success':'firstrun', value: filename});
-                        } else {
-                            callback(new Error("Error cropping image via ghostknife: " + code));
                         }
                     });
-
                 });
             });
         });
@@ -104,17 +101,40 @@ function compare(filename, callback) {
     if (!fs.existsSync(baseFile)) {
         return callback(new Error(baseFile + " does not exist"));
     } else {
-        // But instead, we have to spawn the global imagediff because the node one is acting weird
-        var spawn = require('child_process').spawn,
-            imgdf = spawn(_processRoot + '/lib/GhostDiff/ghostdiff', [filename, baseFile]);
-        imgdf.on('exit', function(code) {
-            if (code === 0) {
+        _compareImages(baseFile, filename, function(res) {
+            if (res === true) { // visually equal
                 callback();
-            } else {
-                callback.fail(new Error("Images don't match: " + filename));
+            } else {  // not visually equal
+                if (_createImageDiff) {  // create a visual difference file and then fail
+                    generateImageDiff(baseFile, filename, callback);
+                } else {
+                    invokeMismatchFailure(callback, baseFile);
+
+                }
             }
         });
     }
+}
+
+// Create a visual difference file for the two files.
+function generateImageDiff(baseFile, newFile, callback) {
+
+    var visDiffFile = newFile.replace(".diff", ".visdiff");  // Eventually, we should come up with better names
+
+    _createImageDiff(baseFile, newFile, visDiffFile, function(err)  {
+        if (err) {
+            callback.fail("Error creating visual diff file: " + err);
+        }
+        else
+        {
+            logger.warning("\tImages do not match. Generated visual difference file: " +  visDiffFile);
+            invokeMismatchFailure(callback, baseFile);
+        }
+    });
+}
+
+function invokeMismatchFailure(callback, baseFile) {
+    callback.fail(new Error("Generated image does not match baseline: " + baseFile) );
 }
 
 module.exports = exports;

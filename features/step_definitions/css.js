@@ -11,6 +11,14 @@ module.exports = function() {
         shouldHaveOffsetPropertyOfValue, shouldHavePropertyOfComparatorThanValue,
         shouldLookTheSameAsBefore;
 
+    // Use gm-image-utils if GraphicsMagick is available), as its 7-10X faster.
+    // Otherwise, fallback to ghost-image-utils.
+    var imageUtils;
+    var gmUtils = require('../support/gm-image-utils');
+    gmUtils.isAvailable( function(res) {
+        imageUtils = res ? gmUtils : require('../support/ghost-image-utils');
+    });
+
     /* "<Then> the <element> should have <property> of <value>" */
     // Map the given name to the selector then find that element in the page
     // The measured value of the property should be the one we expect
@@ -187,7 +195,10 @@ module.exports = function() {
             screenshotRoot: process.env.TESTPATH + '/screenshots',
             processRoot: process.env.BINARYPATH,
             webdriver: this,
-            fileNameGetter: config('fileNameGetter') || false
+            fileNameGetter: config('fileNameGetter') || false,
+            cropImage:imageUtils.cropImage,
+            compareImages:imageUtils.compareImages,
+            createImageDiff:imageUtils.createImageDiff
         });
         imageTest.screenshot(elementSelector, function(err, result) {
             if (err) {
